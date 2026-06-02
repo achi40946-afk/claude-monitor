@@ -88,7 +88,9 @@ def main():
     save_state(indicator, desc)
 
     if prev_indicator is None:
-        print("[首次运行] 已记录初始状态，无通知")
+        print("[首次运行] 已记录初始状态")
+        if topic:
+            push_ntfy(topic, "Claude 监控已就绪", f"{emoji} 当前状态: {label}\n{desc}\n状态变化时将实时推送。", is_bad=False)
         return
 
     if indicator == prev_indicator:
