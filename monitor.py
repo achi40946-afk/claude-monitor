@@ -6,6 +6,7 @@ import sys
 import io
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
+from urllib.parse import quote
 
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -46,15 +47,14 @@ def save_state(indicator: str, description: str):
 
 def push_ntfy(topic: str, title: str, body: str, is_bad: bool):
     """通过 ntfy.sh 推送通知到 iPhone"""
-    url = f"{NTFY_SERVER}/{topic}"
+    url = f"{NTFY_SERVER}/{topic}/{quote(title, safe='')}"
     data = body.encode("utf-8")
     headers = {
-        "Title": title,
         "Priority": "5" if is_bad else "3",
         "Tags": "rotating_light" if is_bad else "white_check_mark",
     }
     try:
-        req = Request(url, data=data, headers=headers)
+        req = Request(url, data=data, method="POST")
         with urlopen(req, timeout=10) as resp:
             ok = resp.status == 200
             print(f"[ntfy] 推送{'成功' if ok else '失败'}: {title}")
