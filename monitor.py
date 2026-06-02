@@ -6,7 +6,6 @@ import sys
 import io
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
-from urllib.parse import quote
 
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -47,9 +46,12 @@ def save_state(indicator: str, description: str):
 
 def push_ntfy(topic: str, title: str, body: str, is_bad: bool):
     """通过 ntfy.sh 推送通知到 iPhone"""
-    url = f"{NTFY_SERVER}/{topic}/{quote(title, safe='')}"
+    url = f"{NTFY_SERVER}/{topic}"
     data = body.encode("utf-8")
+    # 标题只用 ASCII，中文放正文里（HTTP 头不支持中文）
+    ascii_title = title.encode("ascii", errors="ignore").decode("ascii") or "Claude Status"
     headers = {
+        "Title": ascii_title,
         "Priority": "5" if is_bad else "3",
         "Tags": "rotating_light" if is_bad else "white_check_mark",
     }
@@ -57,10 +59,10 @@ def push_ntfy(topic: str, title: str, body: str, is_bad: bool):
         req = Request(url, data=data, method="POST")
         with urlopen(req, timeout=10) as resp:
             ok = resp.status == 200
-            print(f"[ntfy] 推送{'成功' if ok else '失败'}: {title}")
+            print(f"[ntfy] {'成功' if ok else '失败'}: {ascii_title}")
             return ok
     except Exception as e:
-        print(f"[ntfy] 推送异常: {e}")
+        print(f"[ntfy] 异常: {e}")
         return False
 
 
@@ -90,7 +92,7 @@ def main():
     if prev_indicator is None:
         print("[首次运行] 已记录初始状态")
         if topic:
-            push_ntfy(topic, "Claude 监控已就绪", f"{emoji} 当前状态: {label}\n{desc}\n状态变化时将实时推送。", is_bad=False)
+            push_ntfy(topic, "Claude Monitor ON", f"{emoji} {label}\n{desc}\nA社状态变化时实时推送。", is_bad=False)
         return
 
     if indicator == prev_indicator:
@@ -103,13 +105,13 @@ def main():
     now_str = datetime.now(timezone.utc).strftime("%m-%d %H:%M UTC")
 
     if improved:
-        title = f"A社恢复了！"
+        title = "Claude UP"
         body = f"{emoji} {label}\n{now_str}\n之前: {prev_desc}\n现在: {desc}"
         if topic:
             push_ntfy(topic, title, body, is_bad=False)
         print(f"[恢复] {prev_indicator} → {indicator}")
     elif severity > prev_sev:
-        title = f"A社出问题了！"
+        title = "Claude DOWN"
         body = f"{emoji} {label}\n{now_str}\n{desc}"
         if topic:
             push_ntfy(topic, title, body, is_bad=True)
