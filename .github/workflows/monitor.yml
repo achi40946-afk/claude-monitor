@@ -18,7 +18,7 @@ jobs:
 
       - name: 检查状态 & 推送通知
         env:
-          BARK_KEY: ${{ secrets.BARK_KEY }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python monitor.py
 
       - name: 提交状态变更记录
