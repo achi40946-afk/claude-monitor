@@ -1,0 +1,115 @@
+"""Claude 状态监控 — 云端版（GitHub Actions 定时触发，每次运行一次即退出）"""
+
+import json
+import os
+import sys
+import io
+from datetime import datetime, timezone
+from urllib.request import Request, urlopen
+
+# Windows 本地测试时避免 GBK 编码报错（GitHub Actions 上无影响）
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+STATUS_URL = "https://status.claude.com/api/v2/status.json"
+STATE_FILE = "state.json"
+TIMEOUT = 10
+
+STATUS_MAP = {
+    "none":     ("一切正常",  0),
+    "minor":    ("轻微降级",  1),
+    "major":    ("服务中断",  2),
+    "critical": ("严重故障",  3),
+}
+
+EMOJI = {"none": "✅", "minor": "⚠️", "major": "🔴", "critical": "💀"}
+
+
+def fetch_status():
+    req = Request(STATUS_URL, headers={"User-Agent": "ClaudeMonitor/1.0"})
+    with urlopen(req, timeout=TIMEOUT) as resp:
+        data = json.loads(resp.read())
+    return data["status"]["indicator"], data["status"]["description"]
+
+
+def load_state():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    return {"indicator": None, "description": ""}
+
+
+def save_state(indicator: str, description: str):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump({"indicator": indicator, "description": description}, f)
+
+
+def push_bark(title: str, body: str, is_bad: bool):
+    key = os.environ.get("BARK_KEY", "")
+    if not key:
+        print("[Bark] BARK_KEY 未配置，跳过推送")
+        return False
+
+    params = "?sound=alarm&isArchive=1" if is_bad else "?isArchive=1"
+    url = f"https://api.day.app/{key}/{title}/{body}{params}"
+    try:
+        req = Request(url, headers={"User-Agent": "ClaudeMonitor/1.0"})
+        with urlopen(req, timeout=10) as resp:
+            ok = resp.status == 200
+            print(f"[Bark] 推送{'成功' if ok else '失败'}: {title}")
+            return ok
+    except Exception as e:
+        print(f"[Bark] 推送异常: {e}")
+        return False
+
+
+def main():
+    print(f"==> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC 开始检查...")
+
+    try:
+        indicator, desc = fetch_status()
+    except Exception as e:
+        print(f"[错误] 获取状态失败: {e}")
+        sys.exit(1)
+
+    label, severity = STATUS_MAP.get(indicator, (indicator, 99))
+    emoji = EMOJI.get(indicator, "?")
+    print(f"[状态] {emoji} {label} — {desc}")
+
+    prev = load_state()
+    prev_indicator = prev.get("indicator")
+    prev_desc = prev.get("description", "")
+
+    # 记录当前状态（无论是否变化）
+    save_state(indicator, desc)
+
+    if prev_indicator is None:
+        print("[首次运行] 已记录初始状态，无通知")
+        return
+
+    if indicator == prev_indicator:
+        print("[无变化] 状态保持一致")
+        return
+
+    # 状态有变化
+    _, prev_sev = STATUS_MAP.get(prev_indicator, ("?", 99))
+    improved = prev_sev > severity
+
+    now_str = datetime.now(timezone.utc).strftime("%m-%d %H:%M UTC")
+
+    if improved:
+        title = f"A社恢复了！{now_str}"
+        body = f"{emoji} {label}\n之前: {prev_desc}\n现在: {desc}"
+        push_bark(title, body, is_bad=False)
+        print(f"[恢复] {prev_indicator} → {indicator}")
+    elif severity > prev_sev:
+        title = f"A社出问题了！{now_str}"
+        body = f"{emoji} {label}\n{desc}"
+        push_bark(title, body, is_bad=True)
+        print(f"[故障] {prev_indicator} → {indicator}")
+    else:
+        print(f"[状态变更] {prev_indicator} → {indicator}（严重度未变）")
+
+
+if __name__ == "__main__":
+    main()
