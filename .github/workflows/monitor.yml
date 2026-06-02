@@ -1,0 +1,30 @@
+name: Claude Status Monitor
+
+on:
+  schedule:
+    # 每 2 分钟检查一次
+    - cron: "*/2 * * * *"
+  workflow_dispatch:  # 允许手动触发测试
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 检查状态 & 推送通知
+        env:
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+        run: python monitor.py
+
+      - name: 提交状态变更记录
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git diff --staged --quiet || git commit -m "state: $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
